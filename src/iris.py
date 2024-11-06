@@ -6,8 +6,8 @@ from pydrake.all import (
     Intersection,
     IrisFromCliqueCoverOptions,
     IrisInConfigurationSpaceFromCliqueCover,
-    FastIris,
-    FastIrisOptions,
+    IrisZO,
+    IrisZoOptions,
     IrisInConfigurationSpace,
     IrisOptions,
     SceneGraphCollisionChecker,
@@ -29,13 +29,16 @@ import matplotlib.pyplot as plt
 import matplotlib
 import pyvista as pv
 import time
+
 matplotlib.use("tkagg")
 
 
-class IrisRegionGenerator():
+class IrisRegionGenerator:
     def __init__(self, meshcat, collision_checker, regions_file, DEBUG=False):
         self.meshcat = meshcat
-        self.collision_checker = collision_checker  # ConfigurationObstacleCollisionChecker
+        self.collision_checker = (
+            collision_checker  # ConfigurationObstacleCollisionChecker
+        )
         self.plant = collision_checker.plant()
         self.plant_context = collision_checker.plant_context()
 
@@ -43,9 +46,10 @@ class IrisRegionGenerator():
 
         self.DEBUG = DEBUG
 
-
     @staticmethod
-    def visualize_connectivity(iris_regions, coverage, output_file='../iris_connectivity.svg', skip_svg=False):
+    def visualize_connectivity(
+        iris_regions, coverage, output_file="../iris_connectivity.svg", skip_svg=False
+    ):
         """
         Create and save SVG graph of IRIS Region connectivity.
 
@@ -73,23 +77,35 @@ class IrisRegionGenerator():
 
         # Add text annotations for numNodes and numEdges
         annotation = f"Nodes: {numNodes}, Edges: {numEdges}, Coverage: {coverage}"
-        graph.add_node(pydot.Node("annotation", label=annotation, shape="none", fontsize="12", pos="0,-1!", margin="0"))
+        graph.add_node(
+            pydot.Node(
+                "annotation",
+                label=annotation,
+                shape="none",
+                fontsize="12",
+                pos="0,-1!",
+                margin="0",
+            )
+        )
 
         if not skip_svg:
             svg = graph.create_svg()
 
-            with open(output_file, 'wb') as svg_file:
+            with open(output_file, "wb") as svg_file:
                 svg_file.write(svg)
 
         return numNodes, numEdges
-    
 
     def estimate_coverage(self, regions, num_samples=10000, seed=42):
         rng = RandomGenerator(seed)
-        sampling_domain = HPolyhedron.MakeBox(self.plant.GetPositionLowerLimits(), self.plant.GetPositionUpperLimits())
+        sampling_domain = HPolyhedron.MakeBox(
+            self.plant.GetPositionLowerLimits(), self.plant.GetPositionUpperLimits()
+        )
         last_sample = sampling_domain.UniformSample(rng)
 
-        self.collision_checker.SetConfigurationSpaceObstacles([])  # We don't want to account for any c-space obstacles during the coverge estimate
+        self.collision_checker.SetConfigurationSpaceObstacles(
+            []
+        )  # We don't want to account for any c-space obstacles during the coverge estimate
 
         num_samples_in_regions = 0
         num_samples_collision_free = 0
@@ -108,14 +124,17 @@ class IrisRegionGenerator():
 
         return num_samples_in_regions / num_samples_collision_free
 
-
     def visualize_cspace(self, num_samples=100000, seed=42):
         rng = RandomGenerator(seed)
         cspace_dim = self.plant.num_positions()
-        sampling_domain = HPolyhedron.MakeBox(self.plant.GetPositionLowerLimits(), self.plant.GetPositionUpperLimits())
+        sampling_domain = HPolyhedron.MakeBox(
+            self.plant.GetPositionLowerLimits(), self.plant.GetPositionUpperLimits()
+        )
         last_sample = sampling_domain.UniformSample(rng)
 
-        self.collision_checker.SetConfigurationSpaceObstacles([])  # We don't want to account for any c-space obstacles during this visualization
+        self.collision_checker.SetConfigurationSpaceObstacles(
+            []
+        )  # We don't want to account for any c-space obstacles during this visualization
 
         collision_free_samples = None  # N x cspace_dim array
         for _ in range(num_samples):
@@ -126,11 +145,13 @@ class IrisRegionGenerator():
                 if collision_free_samples is None:
                     collision_free_samples = last_sample[np.newaxis, :]
                 else:
-                    collision_free_samples = np.vstack((collision_free_samples, last_sample))
+                    collision_free_samples = np.vstack(
+                        (collision_free_samples, last_sample)
+                    )
 
         # print(f"Collision-free fraction: {np.shape(collision_free_samples)[0] / num_samples}")  # ~11%
 
-        if (cspace_dim == 6):  # 6 choose 3 = 20; make a 4x5 grid of plots
+        if cspace_dim == 6:  # 6 choose 3 = 20; make a 4x5 grid of plots
             plotter = pv.Plotter(shape=(4, 5), notebook=False)
 
             for i in range(20):
@@ -140,9 +161,9 @@ class IrisRegionGenerator():
                     y_idx = 1
                     z_idx = 2
                 else:
-                    if z_idx != cspace_dim-1:
+                    if z_idx != cspace_dim - 1:
                         z_idx += 1
-                    elif y_idx != cspace_dim-2:  # and z_idx == cspace_dim-1
+                    elif y_idx != cspace_dim - 2:  # and z_idx == cspace_dim-1
                         y_idx += 1
                         z_idx = y_idx + 1
                     else:  # and z_idx == cspace_dim-1 and y_idx == cspace_dim-2
@@ -152,18 +173,21 @@ class IrisRegionGenerator():
 
                 plotter.subplot(i // 5, i % 5)
 
-                plotter.add_mesh(pv.PolyData(collision_free_samples[:, [x_idx, y_idx, z_idx]]), 
-                                render_points_as_spheres=True, point_size=2.5)
-                
-                plotter.camera_position = 'xy'
+                plotter.add_mesh(
+                    pv.PolyData(collision_free_samples[:, [x_idx, y_idx, z_idx]]),
+                    render_points_as_spheres=True,
+                    point_size=2.5,
+                )
+
+                plotter.camera_position = "xy"
                 plotter.camera.azimuth = 45
                 plotter.camera.elevation = 45
                 plotter.show_grid()
                 plotter.show_bounds(
-                    grid='back',
+                    grid="back",
                     axes_ranges=[-3.15, 3.15, -3.15, 3.15, -3.15, 3.15],
-                    location='outer',
-                    ticks='both',
+                    location="outer",
+                    ticks="both",
                     show_xlabels=False,
                     show_ylabels=False,
                     show_zlabels=False,
@@ -173,7 +197,6 @@ class IrisRegionGenerator():
                 )
 
             plotter.show()
-
 
     def generate_overlap_histogram(self, regions, seed=42):
         """
@@ -208,21 +231,42 @@ class IrisRegionGenerator():
         # Plotting the histogram
         if self.DEBUG:
             plt.figure(figsize=(10, 6))
-            bars = plt.bar(num_regions, samples, color='blue', edgecolor='black')
-            plt.xlabel('Number of Regions Sample Appears In')
-            plt.ylabel('Number of Samples')
-            plt.title('Histogram of Sample Distribution Across Regions')
+            bars = plt.bar(num_regions, samples, color="blue", edgecolor="black")
+            plt.xlabel("Number of Regions Sample Appears In")
+            plt.ylabel("Number of Samples")
+            plt.title("Histogram of Sample Distribution Across Regions")
             plt.xticks(num_regions)  # Ensure all x-axis labels are shown
-            plt.grid(axis='y', linestyle='--', alpha=0.7)
+            plt.grid(axis="y", linestyle="--", alpha=0.7)
             # Add text annotations on top of each bar
             for bar in bars:
                 height = bar.get_height()
-                plt.text(bar.get_x() + bar.get_width() / 2.0, height, f'{height}', ha='center', va='bottom')
+                plt.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height,
+                    f"{height}",
+                    ha="center",
+                    va="bottom",
+                )
             plt.show(block=False)
             plt.pause(1)  # Allow the plot to be displayed
 
-
-    def test_iris_region(self, plant, plant_context, meshcat, regions, seed=42, num_sample=10000, colors=None, name="regions", coverage=True, histogram=True, connectivity=True, svg=True, task_space_render=True):
+    def test_iris_region(
+        self,
+        plant,
+        plant_context,
+        meshcat,
+        regions,
+        seed=42,
+        num_sample=10000,
+        colors=None,
+        name="regions",
+        coverage=True,
+        histogram=True,
+        connectivity=True,
+        svg=True,
+        task_space_render=True,
+        ee_frame_name="arm_eef",
+    ):
         """
         Plot small spheres in the volume of each region. (we are using forward
         kinematics to return from configuration space to task space.)
@@ -230,18 +274,22 @@ class IrisRegionGenerator():
         regions is a list of ConvexSets.
         """
         if not self.DEBUG:
-            print("IrisRegionGenerator: DEBUG set to False; skipping region visualization.")
+            print(
+                "IrisRegionGenerator: DEBUG set to False; skipping region visualization."
+            )
             return
-        
+
         if coverage:
             coverage = self.estimate_coverage(regions)
             print(f"Estimated region coverage fraction: {coverage}")
 
         if histogram:
             self.generate_overlap_histogram(regions)
-        
+
         if connectivity:
-            num_nodes, num_edges = IrisRegionGenerator.visualize_connectivity(regions, coverage, skip_svg=(not svg))
+            num_nodes, num_edges = IrisRegionGenerator.visualize_connectivity(
+                regions, coverage, skip_svg=(not svg)
+            )
             if svg:
                 print("Connectivity graph saved to ../iris_connectivity.svg.")
             print(f"Number of nodes and edges: {num_nodes}, {num_edges}")
@@ -249,69 +297,94 @@ class IrisRegionGenerator():
 
         if task_space_render:
             world_frame = plant.world_frame()
-            ee_frame = plant.GetFrameByName("arm_eef")
+            ee_frame = plant.GetFrameByName(ee_frame_name)
 
             rng = RandomGenerator(seed)
 
             # Allow caller to input custom colors
             if colors is None:
                 colors = [
-                    Rgba(0.5,0.0,0.0,0.5),
-                    Rgba(0.0,0.5,0.0,0.5),
-                    Rgba(0.0,0.0,0.5,0.5),
-                    Rgba(0.5,0.5,0.0,0.5),
-                    Rgba(0.5,0.0,0.5,0.5),
-                    Rgba(0.0,0.5,0.5,0.5),
-                    Rgba(0.2,0.2,0.2,0.5),
-                    Rgba(0.5,0.2,0.0,0.5),
-                    Rgba(0.2,0.5,0.0,0.5),
-                    Rgba(0.5,0.0,0.2,0.5),
-                    Rgba(0.2,0.0,0.5,0.5),
-                    Rgba(0.0,0.5,0.2,0.5),
-                    Rgba(0.0,0.2,0.5,0.5),
+                    Rgba(0.5, 0.0, 0.0, 0.5),
+                    Rgba(0.0, 0.5, 0.0, 0.5),
+                    Rgba(0.0, 0.0, 0.5, 0.5),
+                    Rgba(0.5, 0.5, 0.0, 0.5),
+                    Rgba(0.5, 0.0, 0.5, 0.5),
+                    Rgba(0.0, 0.5, 0.5, 0.5),
+                    Rgba(0.2, 0.2, 0.2, 0.5),
+                    Rgba(0.5, 0.2, 0.0, 0.5),
+                    Rgba(0.2, 0.5, 0.0, 0.5),
+                    Rgba(0.5, 0.0, 0.2, 0.5),
+                    Rgba(0.2, 0.0, 0.5, 0.5),
+                    Rgba(0.0, 0.5, 0.2, 0.5),
+                    Rgba(0.0, 0.2, 0.5, 0.5),
                 ]
 
             for i in range(len(regions)):
                 region = regions[i]
 
-                xyzs = []  # List to hold XYZ positions of configurations in the IRIS region
+                xyzs = (
+                    []
+                )  # List to hold XYZ positions of configurations in the IRIS region
 
                 q_sample = region.UniformSample(rng)
                 prev_sample = q_sample
 
                 plant.SetPositions(plant_context, q_sample)
-                xyzs.append(plant.CalcRelativeTransform(plant_context, frame_A=world_frame, frame_B=ee_frame).translation())
+                xyzs.append(
+                    plant.CalcRelativeTransform(
+                        plant_context, frame_A=world_frame, frame_B=ee_frame
+                    ).translation()
+                )
 
-                for _ in range(num_sample-1):
+                for _ in range(num_sample - 1):
                     q_sample = region.UniformSample(rng, prev_sample)
                     prev_sample = q_sample
 
                     plant.SetPositions(plant_context, q_sample)
-                    xyzs.append(plant.CalcRelativeTransform(plant_context, frame_A=world_frame, frame_B=ee_frame).translation())
-                
+                    xyzs.append(
+                        plant.CalcRelativeTransform(
+                            plant_context, frame_A=world_frame, frame_B=ee_frame
+                        ).translation()
+                    )
+
                 # Create pointcloud from sampled point in IRIS region in order to plot in Meshcat
                 xyzs = np.array(xyzs)
                 pc = PointCloud(len(xyzs))
                 pc.mutable_xyzs()[:] = xyzs.T
-                meshcat.SetObject(f"{name}/region {i}", pc, point_size=0.025, rgba=colors[i % len(colors)])
-
+                meshcat.SetObject(
+                    f"{name}/region {i}",
+                    pc,
+                    point_size=0.025,
+                    rgba=colors[i % len(colors)],
+                )
 
     def load_and_test_regions(self, name="regions"):
         regions = LoadIrisRegionsYamlFile(self.regions_file)
 
         # To control how many sets to evaluate
         num_sets = 13
-        regions = {k: v for k, v in regions.items() if k.startswith("set") and k[3:].isdigit() and 0 <= int(k[3:]) <= num_sets}
+        regions = {
+            k: v
+            for k, v in regions.items()
+            if k.startswith("set") and k[3:].isdigit() and 0 <= int(k[3:]) <= num_sets
+        }
 
         regions = [hpolyhedron for hpolyhedron in regions.values()]
 
         volumes = []
         for r in regions:
-            volumes.append(r.CalcVolumeViaSampling(RandomGenerator(0), desired_rel_accuracy=0.01, max_num_samples=1000000).volume)
+            volumes.append(
+                r.CalcVolumeViaSampling(
+                    RandomGenerator(0),
+                    desired_rel_accuracy=0.01,
+                    max_num_samples=1000000,
+                ).volume
+            )
         print("volumes:", volumes)
 
-        self.test_iris_region(self.plant, self.plant_context, self.meshcat, regions, name=name)
-
+        self.test_iris_region(
+            self.plant, self.plant_context, self.meshcat, regions, name=name
+        )
 
     def generate_source_region_at_q_nominal(self, q):
         """
@@ -321,29 +394,44 @@ class IrisRegionGenerator():
         # Explicitely set plant positions at q as as seed for IRIS
         self.plant.SetPositions(self.plant_context, q)
 
-        options = FastIrisOptions()
+        options = IrisZoOptions()
         options.random_seed = 0
         options.verbose = True
-        domain = HPolyhedron.MakeBox(self.plant.GetPositionLowerLimits(),
-                                     self.plant.GetPositionUpperLimits())
+        domain = HPolyhedron.MakeBox(
+            self.plant.GetPositionLowerLimits(), self.plant.GetPositionUpperLimits()
+        )
         kEpsilonEllipsoid = 1e-5
-        clique_ellipse = Hyperellipsoid.MakeHypersphere(kEpsilonEllipsoid, self.plant.GetPositions(self.plant_context))
-        region = FastIris(self.collision_checker, clique_ellipse, domain, options)
+        clique_ellipse = Hyperellipsoid.MakeHypersphere(
+            kEpsilonEllipsoid, self.plant.GetPositions(self.plant_context)
+        )
+        region = IrisZO(self.collision_checker, clique_ellipse, domain, options)
 
-        regions_dict = {"set0" : region}
+        regions_dict = {"set0": region}
         SaveIrisRegionsYamlFile(self.regions_file, regions_dict)
-        
+
         # This source region will be drawn in black
-        self.test_iris_region(self.plant, self.plant_context, self.meshcat, [region], colors=[Rgba(0.0,0.0,0.0,0.5)], coverage=True, histogram=False, connectivity=False, svg=False, task_space_render=False)
+        self.test_iris_region(
+            self.plant,
+            self.plant_context,
+            self.meshcat,
+            [region],
+            colors=[Rgba(0.0, 0.0, 0.0, 0.5)],
+            coverage=True,
+            histogram=False,
+            connectivity=False,
+            svg=False,
+            task_space_render=False,
+        )
 
-
-    def generate_source_iris_regions(self, 
-                                     minimum_clique_size=12, 
-                                     coverage_threshold=0.35, 
-                                     num_points_per_visibility_round=500, 
-                                     clique_covers_seed=0, 
-                                     use_previous_saved_regions=True, 
-                                     coverage_check_only=False):
+    def generate_source_iris_regions(
+        self,
+        minimum_clique_size=12,
+        coverage_threshold=0.35,
+        num_points_per_visibility_round=500,
+        clique_covers_seed=0,
+        use_previous_saved_regions=True,
+        coverage_check_only=False,
+    ):
         """
         Source IRIS regions are defined as the regions considering only self-
         collision with the robot, and collision with the walls of the empty truck
@@ -369,7 +457,9 @@ class IrisRegionGenerator():
             options.iteration_limit = 0
             regions = LoadIrisRegionsYamlFile(self.regions_file)
             regions = [hpolyhedron for hpolyhedron in regions.values()]
-            self.collision_checker.SetConfigurationSpaceObstacles([])  # We don't want to account for any c-space obstacles during the coverge estimate
+            self.collision_checker.SetConfigurationSpaceObstacles(
+                []
+            )  # We don't want to account for any c-space obstacles during the coverge estimate
         elif use_previous_saved_regions:
             regions = LoadIrisRegionsYamlFile(self.regions_file)
             regions = [hpolyhedron for hpolyhedron in regions.values()]
@@ -381,24 +471,38 @@ class IrisRegionGenerator():
 
             # Set previous regions as obstacles to encourage exploration
             # options.iris_options.configuration_obstacles = region_obstacles  # No longer needed bc of the line below
-            self.collision_checker.SetConfigurationSpaceObstacles(region_obstacles)  # Set config. space obstacles in collision checker so FastIRIS will also respect them
+            self.collision_checker.SetConfigurationSpaceObstacles(
+                region_obstacles
+            )  # Set config. space obstacles in collision checker so IrisZO will also respect them
         else:
             regions = []
 
         regions = IrisInConfigurationSpaceFromCliqueCover(
-            checker=self.collision_checker, options=options, generator=RandomGenerator(clique_covers_seed), sets=regions
+            checker=self.collision_checker,
+            options=options,
+            generator=RandomGenerator(clique_covers_seed),
+            sets=regions,
         )  # List of HPolyhedrons
 
         # Remove redundant hyperplanes
         regions = [r.ReduceInequalities() for r in regions]
 
         if not coverage_check_only:
-            regions_dict = {f"set{i}" : regions[i] for i in range(len(regions))}
+            regions_dict = {f"set{i}": regions[i] for i in range(len(regions))}
             SaveIrisRegionsYamlFile(self.regions_file, regions_dict)
 
-            self.test_iris_region(self.plant, self.plant_context, self.meshcat, regions, coverage=True, histogram=False, connectivity=True, svg=False, task_space_render=False)
-        
-    
+            self.test_iris_region(
+                self.plant,
+                self.plant_context,
+                self.meshcat,
+                regions,
+                coverage=True,
+                histogram=False,
+                connectivity=True,
+                svg=False,
+                task_space_render=False,
+            )
+
     @staticmethod
     def post_process_iris_regions(regions_dict, edge_count_threshold=0.75):
         """
@@ -422,10 +526,12 @@ class IrisRegionGenerator():
             for s_, r_ in regions_dict.items():
                 if r.IntersectsWith(r_):
                     if s not in edge_counts.keys():
-                        edge_counts[s] = 0.5  # Add 0.5 instead of 1 since we're going to double count every edge
+                        edge_counts[s] = (
+                            0.5  # Add 0.5 instead of 1 since we're going to double count every edge
+                        )
                     else:
                         edge_counts[s] += 0.5
-                    
+
                     if s_ not in edge_counts.keys():
                         edge_counts[s_] = 0.5
                     else:
@@ -433,26 +539,32 @@ class IrisRegionGenerator():
 
         avg_edge_count = sum(ct for ct in edge_counts.values()) / len(edge_counts)
         print(f"IRIS region avg_edge_count: {avg_edge_count}")
-                    
+
         # Then perform simplifications on each HPolyhedron
         output_regions = {}
         for s, r in regions_dict.items():
             intersecting_polytopes = []
             for s_, r_ in regions_dict.items():
-                if r.IntersectsWith(r_) and edge_counts[s_] < avg_edge_count * edge_count_threshold:
+                if (
+                    r.IntersectsWith(r_)
+                    and edge_counts[s_] < avg_edge_count * edge_count_threshold
+                ):
                     intersecting_polytopes.append(r_)
 
-            r_simplified = r.SimplifyByIncrementalFaceTranslation(min_volume_ratio=0.1,
-                                                                  max_iterations=1,
-                                                                  intersecting_polytopes=intersecting_polytopes,
-                                                                  random_seed=42)
+            r_simplified = r.SimplifyByIncrementalFaceTranslation(
+                min_volume_ratio=0.1,
+                max_iterations=1,
+                intersecting_polytopes=intersecting_polytopes,
+                random_seed=42,
+            )
             print("finished call to SimplifyByIncrementalFaceTranslation.")
-            
+
             output_regions[s] = r_simplified
-        
+
         # FOR TESTING ONLY
         SaveIrisRegionsYamlFile("../data/TEMPORARY.yaml", output_regions)
-        IrisRegionGenerator.visualize_connectivity(output_regions, "n/a", output_file='../TEMPORARY.svg')
+        IrisRegionGenerator.visualize_connectivity(
+            output_regions, "n/a", output_file="../TEMPORARY.svg"
+        )
 
         return output_regions
-

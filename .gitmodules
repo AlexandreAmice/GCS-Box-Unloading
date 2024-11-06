@@ -1,3 +1,6 @@
 [submodule "data/iris_benchmarks_scenes_urdf"]
 	path = data/iris_benchmarks_scenes_urdf
 	url = https://github.com/Michaelszeng/iris_benchmarks_scenes_urdf.git
+[submodule "drake"]
+	path = drake
+	url = https://github.com/AlexandreAmice/drake.git
