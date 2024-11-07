@@ -4,3 +4,9 @@
 [submodule "drake"]
 	path = drake
 	url = https://github.com/AlexandreAmice/drake.git
+[submodule "data/iris_benchmarks"]
+	path = data/iris_benchmarks
+	url = https://github.com/wernerpe/iris_benchmarks.git
+[submodule "external/drake"]
+	path = external/drake
+	url = https://github.com/AlexandreAmice/drake.git

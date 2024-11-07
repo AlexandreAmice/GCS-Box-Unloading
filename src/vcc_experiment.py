@@ -58,8 +58,6 @@ scene_yaml_file = os.path.join(
 region_file = os.path.join(data_directory, "iris_regions" + TEST_SCENE + ".yaml")
 
 meshcat = StartMeshcat()
-
-
 robot_diagram_builder = RobotDiagramBuilder()
 parser = robot_diagram_builder.parser()
 iris_environement_assets = os.path.join(
