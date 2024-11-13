@@ -17,7 +17,11 @@ from pydrake.all import (
 )
 
 # from manipulation.station import MakeHardwareStation, load_scenario
-from station import MakeHardwareStation, load_scenario, add_directives  # local version allows ForceDriver
+from station import (
+    MakeHardwareStation,
+    load_scenario,
+    add_directives,
+)  # local version allows ForceDriver
 from manipulation.scenarios import AddMultibodyTriad, AddShape
 from manipulation.meshcat_utils import AddMeshcatTriad
 from manipulation.utils import ConfigureParser
@@ -25,6 +29,7 @@ from manipulation.utils import ConfigureParser
 import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
+
 matplotlib.use("tkagg")
 import os
 import time
@@ -33,9 +38,20 @@ import yaml
 import logging
 import datetime
 
-from scenario import NUM_BOXES, BOX_DIM, q_nominal, q_place_nominal, scenario_yaml, robot_yaml, robot_pose, set_up_scene, get_W_X_eef
+from scenario import (
+    NUM_BOXES,
+    BOX_DIM,
+    q_nominal,
+    q_place_nominal,
+    scenario_yaml,
+    robot_yaml,
+    robot_pose,
+    set_up_scene,
+    get_W_X_eef,
+)
 
 NUM_BOXES = 0
+
 
 class MeshcatSliderSource(LeafSystem):
     def __init__(self, meshcat):
@@ -43,26 +59,30 @@ class MeshcatSliderSource(LeafSystem):
         self.meshcat = meshcat
 
         if joint_control:
-            self.DeclareVectorOutputPort("slider_values", BasicVector(12), self.DoCalcOutput)
+            self.DeclareVectorOutputPort(
+                "slider_values", BasicVector(12), self.DoCalcOutput
+            )
         else:
-            self.DeclareVectorOutputPort("slider_values", BasicVector(6), self.DoCalcOutput)
+            self.DeclareVectorOutputPort(
+                "slider_values", BasicVector(6), self.DoCalcOutput
+            )
 
     def DoCalcOutput(self, context, output):
         if joint_control:
-            q1 = self.meshcat.GetSliderValue('q1')
-            q2 = self.meshcat.GetSliderValue('q2')
-            q3 = self.meshcat.GetSliderValue('q3')
-            q4 = self.meshcat.GetSliderValue('q4')
-            q5 = self.meshcat.GetSliderValue('q5')
-            q6 = self.meshcat.GetSliderValue('q6')
+            q1 = self.meshcat.GetSliderValue("q1")
+            q2 = self.meshcat.GetSliderValue("q2")
+            q3 = self.meshcat.GetSliderValue("q3")
+            q4 = self.meshcat.GetSliderValue("q4")
+            q5 = self.meshcat.GetSliderValue("q5")
+            q6 = self.meshcat.GetSliderValue("q6")
             output.SetFromVector([q1, q2, q3, q4, q5, q6, 0, 0, 0, 0, 0, 0])
         else:
-            x = self.meshcat.GetSliderValue('x')
-            y = self.meshcat.GetSliderValue('y')
-            z = self.meshcat.GetSliderValue('z')
-            roll = self.meshcat.GetSliderValue('roll')
-            pitch = self.meshcat.GetSliderValue('pitch')
-            yaw = self.meshcat.GetSliderValue('yaw')
+            x = self.meshcat.GetSliderValue("x")
+            y = self.meshcat.GetSliderValue("y")
+            z = self.meshcat.GetSliderValue("z")
+            roll = self.meshcat.GetSliderValue("roll")
+            pitch = self.meshcat.GetSliderValue("pitch")
+            yaw = self.meshcat.GetSliderValue("yaw")
             output.SetFromVector([x, y, z, roll, pitch, yaw])
 
 
@@ -70,51 +90,67 @@ class InverseKinematicsSystem(LeafSystem):
     def __init__(self, plant, meshcat):
         LeafSystem.__init__(self)
         self.plant = plant
+        self.plant_context = self.plant.CreateDefaultContext()
         self.meshcat = meshcat
         self.DeclareVectorInputPort("slider_values", BasicVector(6))
-        self.DeclareVectorOutputPort("desired_state", BasicVector(12), self.CalculateDesiredState)
-        self.DeclareVectorOutputPort("desired_acceleration", BasicVector(6), self.CalculateDesiredAcceleration)
-        
+        self.DeclareVectorOutputPort(
+            "desired_state", BasicVector(12), self.CalculateDesiredState
+        )
+        self.DeclareVectorOutputPort(
+            "desired_acceleration", BasicVector(6), self.CalculateDesiredAcceleration
+        )
+
+        self.kuka_model_index = self.plant.GetModelInstanceByName("kuka")
+
     def CalculateDesiredState(self, context, output):
         slider_values = self.get_input_port(0).Eval(context)
         x, y, z, roll, pitch, yaw = slider_values
-        desired_pose = RigidTransform(RotationMatrix(RollPitchYaw(roll, pitch, yaw)), [x, y, z])
-        
+        desired_pose = RigidTransform(
+            RotationMatrix(RollPitchYaw(roll, pitch, yaw)), [x, y, z]
+        )
+
         ik = InverseKinematics(self.plant)
         ik.AddPositionConstraint(
             self.plant.GetFrameByName("arm_eef"),
             [0, 0, 0],
             self.plant.world_frame(),
             desired_pose.translation(),
-            desired_pose.translation()
+            desired_pose.translation(),
         )
-        ik.AddOrientationConstraint(
-            self.plant.GetFrameByName("arm_eef"),
-            RotationMatrix(),
-            self.plant.world_frame(),
-            desired_pose.rotation(),
-            0.0
-        )
-        
+        # ik.AddOrientationConstraint(
+        #     self.plant.GetFrameByName("arm_eef"),
+        #     RotationMatrix(),
+        #     self.plant.world_frame(),
+        #     desired_pose.rotation(),
+        #     0.0,
+        # )
+
         prog = ik.prog()
-        initial_guess = np.zeros(6)
-        prog.SetInitialGuess(ik.q(), q_nominal)
+        initial_guess = self.plant.GetPositions(
+            self.plant_context, self.kuka_model_index
+        )  # np.zeros(6)
+        prog.SetInitialGuess(ik.q(), initial_guess)
+
+        ik.get_mutable_prog().AddQuadraticErrorCost(
+            np.eye(initial_guess.shape[0]), initial_guess, ik.q()
+        )
+
         result = Solve(prog)
-        
+
         if result.is_success():
             q_solution = result.GetSolution(ik.q())
-            v_solution = np.zeros_like(q_solution)  # Assuming zero velocity for simplicity
-            desired_state = np.concatenate([q_solution, v_solution])
+
         else:
-            print("ik fail; defaulting to zero state.")
-            desired_state = np.zeros(12)
-            
+            print("ik fail")
+            q_solution = initial_guess  # np.zeros_like(result.GetSolution(ik.q()))
+        v_solution = np.zeros_like(q_solution)
+        desired_state = np.concatenate([q_solution, v_solution])
+        self.plant.SetPositions(self.plant_context, self.kuka_model_index, q_solution)
         output.SetFromVector(desired_state)
 
     def CalculateDesiredAcceleration(self, context, output):
         # Assuming zero acceleration for simplicity
         output.SetFromVector(np.zeros(6))
-
 
 
 # Set logging level in drake to DEBUG
@@ -124,16 +160,24 @@ log = logging.getLogger("drake")
 log.setLevel("INFO")
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--fast', default='T', help="T/F; whether or not to use a pre-saved box configuration or randomize box positions from scratch.")
-parser.add_argument('--randomization', default=0, help="integer randomization seed.")
-parser.add_argument('--joint_control', default='F', help="T/F; whether to control joint positions (instead of xyz rpy)")
+parser.add_argument(
+    "--fast",
+    default="T",
+    help="T/F; whether or not to use a pre-saved box configuration or randomize box positions from scratch.",
+)
+parser.add_argument("--randomization", default=0, help="integer randomization seed.")
+parser.add_argument(
+    "--joint_control",
+    default="F",
+    help="T/F; whether to control joint positions (instead of xyz rpy)",
+)
 args = parser.parse_args()
 
 seed = int(args.randomization)
-randomize_boxes = (args.fast == 'F')
-joint_control = (args.joint_control == 'T')
+randomize_boxes = args.fast == "F"
+joint_control = args.joint_control == "T"
 
-    
+
 #####################
 ###    Settings   ###
 #####################
@@ -154,19 +198,19 @@ np.random.seed(seed)
 #####################
 meshcat = StartMeshcat()
 if joint_control:
-    meshcat.AddSlider('q1', -np.pi, np.pi, 0.01, 0.0)
-    meshcat.AddSlider('q2', -np.pi, np.pi, 0.01, -2.2)
-    meshcat.AddSlider('q3', -np.pi, np.pi, 0.01, 2.2)
-    meshcat.AddSlider('q4', -np.pi, np.pi, 0.01, 0.0)
-    meshcat.AddSlider('q5', -np.pi, np.pi, 0.01, 1.57)
-    meshcat.AddSlider('q6', -np.pi, np.pi, 0.01, 0.0)
+    meshcat.AddSlider("q1", -np.pi, np.pi, 0.01, 0.0)
+    meshcat.AddSlider("q2", -np.pi, np.pi, 0.01, -2.2)
+    meshcat.AddSlider("q3", -np.pi, np.pi, 0.01, 2.2)
+    meshcat.AddSlider("q4", -np.pi, np.pi, 0.01, 0.0)
+    meshcat.AddSlider("q5", -np.pi, np.pi, 0.01, 1.57)
+    meshcat.AddSlider("q6", -np.pi, np.pi, 0.01, 0.0)
 else:
-    meshcat.AddSlider('x', -1.0, 2.0, 0.01, 0.75)
-    meshcat.AddSlider('y', -1.0, 1.0, 0.01, 0.0)
-    meshcat.AddSlider('z', 0.0, 3.0, 0.01, 1.0)
-    meshcat.AddSlider('roll', -np.pi, np.pi, 0.01, np.pi)
-    meshcat.AddSlider('pitch', -np.pi, np.pi, 0.01, 0.0)
-    meshcat.AddSlider('yaw', -np.pi, np.pi, 0.01, 0.0)
+    meshcat.AddSlider("x", -1.0, 2.0, 0.01, 0.75)
+    meshcat.AddSlider("y", -1.0, 1.0, 0.01, 0.0)
+    meshcat.AddSlider("z", 0.0, 3.0, 0.01, 1.0)
+    meshcat.AddSlider("roll", -np.pi, np.pi, 0.01, np.pi)
+    meshcat.AddSlider("pitch", -np.pi, np.pi, 0.01, 0.0)
+    meshcat.AddSlider("yaw", -np.pi, np.pi, 0.01, 0.0)
 meshcat.AddButton("Close")
 # meshcat.SetProperty("/drake/contact_forces", "visible", False)  # Doesn't work for some reason
 
@@ -182,7 +226,7 @@ box_directives = f"""
 directives:
 """
 for i in range(NUM_BOXES):
-    relative_path_to_box = '../data/Box_0_5_0_5_0_5.sdf'
+    relative_path_to_box = "../data/Box_0_5_0_5_0_5.sdf"
     absolute_path_to_box = os.path.abspath(relative_path_to_box)
 
     box_directives += f"""
@@ -190,18 +234,22 @@ for i in range(NUM_BOXES):
     name: Boxes/Box_{i}
     file: file://{absolute_path_to_box}
 """
-scenario = add_directives(scenario, data=box_directives)
+if NUM_BOXES > 0:
+    scenario = add_directives(scenario, data=box_directives)
 
 
 ### Hardware station setup
-station = builder.AddSystem(MakeHardwareStation(
-    scenario=scenario,
-    meshcat=meshcat,
-
-    # This is to be able to load our own models from a local path
-    # we can refer to this using the "package://" URI directive
-    parser_preload_callback=lambda parser: parser.package_map().Add(this_drake_module_name, os.getcwd())
-))
+station = builder.AddSystem(
+    MakeHardwareStation(
+        scenario=scenario,
+        meshcat=meshcat,
+        # This is to be able to load our own models from a local path
+        # we can refer to this using the "package://" URI directive
+        parser_preload_callback=lambda parser: parser.package_map().Add(
+            this_drake_module_name, os.getcwd()
+        ),
+    )
+)
 scene_graph = station.GetSubsystemByName("scene_graph")
 plant = station.GetSubsystemByName("plant")
 
@@ -212,7 +260,9 @@ AddMultibodyTriad(plant.GetFrameByName("arm_eef"), scene_graph)
 controller_plant = MultibodyPlant(time_step=0.001)
 parser = Parser(plant)
 ConfigureParser(parser)
-Parser(controller_plant).AddModelsFromString(robot_yaml, ".dmd.yaml")[0]  # ModelInstance object
+Parser(controller_plant).AddModelsFromString(robot_yaml, ".dmd.yaml")[
+    0
+]  # ModelInstance object
 controller_plant.Finalize()
 num_robot_positions = controller_plant.num_positions()
 
@@ -222,13 +272,31 @@ slider_source = builder.AddSystem(MeshcatSliderSource(meshcat))
 
 ### Controller
 if joint_control:
-    zero_accel_source = builder.AddSystem(ConstantVectorSource([0,0,0,0,0,0]))
+    zero_accel_source = builder.AddSystem(ConstantVectorSource([0, 0, 0, 0, 0, 0]))
 
-    controller = builder.AddSystem(InverseDynamicsController(controller_plant, [150]*num_robot_positions, [50]*num_robot_positions, [50]*num_robot_positions, True))  # True = exposes "desired_acceleration" port
-    builder.Connect(station.GetOutputPort("kuka_state"), controller.GetInputPort("estimated_state"))
-    builder.Connect(slider_source.get_output_port(0), controller.GetInputPort("desired_state"))
-    builder.Connect(zero_accel_source.get_output_port(), controller.GetInputPort("desired_acceleration"))
-    builder.Connect(controller.GetOutputPort("generalized_force"), station.GetInputPort("kuka_actuation"))
+    controller = builder.AddSystem(
+        InverseDynamicsController(
+            controller_plant,
+            [150] * num_robot_positions,
+            [50] * num_robot_positions,
+            [50] * num_robot_positions,
+            True,
+        )
+    )  # True = exposes "desired_acceleration" port
+    builder.Connect(
+        station.GetOutputPort("kuka_state"), controller.GetInputPort("estimated_state")
+    )
+    builder.Connect(
+        slider_source.get_output_port(0), controller.GetInputPort("desired_state")
+    )
+    builder.Connect(
+        zero_accel_source.get_output_port(),
+        controller.GetInputPort("desired_acceleration"),
+    )
+    builder.Connect(
+        controller.GetOutputPort("generalized_force"),
+        station.GetInputPort("kuka_actuation"),
+    )
 
 else:
     # Add IK System
@@ -237,11 +305,28 @@ else:
     # Connect sliders to IK system
     builder.Connect(slider_source.get_output_port(0), ik_system.get_input_port(0))
 
-    controller = builder.AddSystem(InverseDynamicsController(controller_plant, [150]*num_robot_positions, [50]*num_robot_positions, [50]*num_robot_positions, True))  # True = exposes "desired_acceleration" port
-    builder.Connect(station.GetOutputPort("kuka_state"), controller.GetInputPort("estimated_state"))
-    builder.Connect(ik_system.get_output_port(0), controller.GetInputPort("desired_state"))
-    builder.Connect(ik_system.get_output_port(1), controller.GetInputPort("desired_acceleration"))
-    builder.Connect(controller.GetOutputPort("generalized_force"), station.GetInputPort("kuka_actuation"))
+    controller = builder.AddSystem(
+        InverseDynamicsController(
+            controller_plant,
+            [150] * num_robot_positions,
+            [50] * num_robot_positions,
+            [50] * num_robot_positions,
+            True,
+        )
+    )  # True = exposes "desired_acceleration" port
+    builder.Connect(
+        station.GetOutputPort("kuka_state"), controller.GetInputPort("estimated_state")
+    )
+    builder.Connect(
+        ik_system.get_output_port(0), controller.GetInputPort("desired_state")
+    )
+    builder.Connect(
+        ik_system.get_output_port(1), controller.GetInputPort("desired_acceleration")
+    )
+    builder.Connect(
+        controller.GetOutputPort("generalized_force"),
+        station.GetInputPort("kuka_actuation"),
+    )
 
 ### Finalizing diagram setup
 diagram = builder.Build()
@@ -267,13 +352,59 @@ controller_context = controller.GetMyMutableContextFromRoot(simulator_context)
 # simulator.get_mutable_integrator().set_maximum_step_size(0.01)  # Increase max step size
 # simulator.get_mutable_integrator().set_target_accuracy(1e-3)  # Set target accuracy
 
-set_up_scene(station, station_context, plant, plant_context, simulator, randomize_boxes, box_fall_runtime if randomize_boxes else 0, box_randomization_runtime if randomize_boxes else 0)
+# set_up_scene(station, station_context, plant, plant_context, simulator, randomize_boxes, box_fall_runtime if randomize_boxes else 0, box_randomization_runtime if randomize_boxes else 0)
 
 # Main simulation loop
 ctr = 0
+
+kuka_model_index = plant.GetModelInstanceByName("kuka")
+
+
+def save_configuration_to_yaml(path, do_rounding=2):
+    q = plant.GetPositions(plant_context, kuka_model_index)
+    if do_rounding >= 0:
+        q = np.round(q, do_rounding)
+    # Write the dictionary to a YAML file
+    string = f"- {q.tolist()}\n"
+    with open(path, "a") as f:
+        print("Saving " + string)
+        f.write(string)
+
+
+# Create the button in Meshcat to trigger the save action
+meshcat.AddButton("Save Config")
+num_click_save = 0
+
+save_path = os.path.join(
+    os.path.abspath(os.path.join(os.getcwd(), os.pardir)),
+    "data/pickle_data/seedpoints.yml",
+)
+
+from pydrake.all import Sphere, Rgba
+
+meshcat.SetObject("target", Sphere(0.05), Rgba(1, 0, 0, 1))
+meshcat.SetProperty("contact_forces", "visible", False)
+
 while not meshcat.GetButtonClicks("Close"):
     simulator.AdvanceTo(simulator_context.get_time() + 0.01)
     ctr += 1
-    if (ctr == 100):
+    if ctr == 100:
         ctr = 0
-        print(plant.GetPositions(plant_context)[7:13])
+        # print(plant.GetPositions(plant_context))
+    if meshcat.GetButtonClicks("Save Config") > num_click_save:
+        num_click_save += meshcat.GetButtonClicks("Save Config")
+        save_configuration_to_yaml(save_path, 4)
+
+    if not joint_control:
+        meshcat.SetTransform(
+            "target",
+            RigidTransform(
+                p=np.array(
+                    [
+                        meshcat.GetSliderValue("x"),
+                        meshcat.GetSliderValue("y"),
+                        meshcat.GetSliderValue("z"),
+                    ]
+                )
+            ),
+        )
